@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import json
 from PIL import Image
+import fitz # PyMuPDF
+import io
 
 # Page config
 st.set_page_config(
@@ -46,14 +48,32 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("📤 Upload Document")
     uploaded_file = st.file_uploader(
-        "Choose an image...",
-        type=['png', 'jpg', 'jpeg', 'bmp'],
-        help="Upload any document image"
+        "Choose a document...",
+        type=['png', 'jpg', 'jpeg', 'bmp', 'pdf'],
+        help="Upload an image or PDF document"
     )
     
     if uploaded_file:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Document", use_container_width=True)
+        if uploaded_file.name.lower().endswith('.pdf'):
+            # Handle PDF preview
+            try:
+                # Create a fresh copy of bytes for preview so we don't consume the main stream
+                pdf_bytes = uploaded_file.getvalue()
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                if len(doc) > 0:
+                    page = doc[0]
+                    pix = page.get_pixmap()
+                    img_data = pix.tobytes("png")
+                    image = Image.open(io.BytesIO(img_data))
+                    st.image(image, caption=f"PDF Preview (Page 1 of {len(doc)})", use_container_width=True)
+                else:
+                    st.error("Empty PDF")
+            except Exception as e:
+                st.error(f"Error previewing PDF: {e}")
+        else:
+            # Handle Image
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Uploaded Document", use_container_width=True)
 
 with col2:
     st.subheader("📊 Structured Output")
@@ -66,7 +86,7 @@ with col2:
                     uploaded_file.seek(0)
                     
                     # Prepare request
-                    files = {"file": uploaded_file.getvalue()}
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
                     data = {}
                     if custom_prompt:
                         data["custom_prompt"] = custom_prompt
