@@ -49,16 +49,16 @@ class NepalNationalIDCardData(BaseModel):
 
 class OfferLetterData(BaseModel):
 
-    course_name: str = Field(..., description="Name of the course/program the student is admitted to")
-    student_name: str = Field(..., description="Full name of the student")
+    course_name: Optional[str] = Field(None, description="Name of the course/program the student is admitted to")
+    student_name: Optional[str] = Field(None, description="Full name of the student")
 
-    total_tuition_amount: float = Field(..., description="Total tuition amount (numeric only, no currency symbol)")
-    total_tuition_currency: str = Field(..., description="Currency of the total tuition amount, e.g. 'AUD', 'USD', 'EUR'")
-    remit_amount: float = Field(..., description="Amount to be remitted/paid now (numeric only, no currency symbol)")
-    remit_currency: str = Field(..., description="Currency of the remit amount, e.g. 'AUD', 'USD', 'EUR'")
+    total_tuition_amount: Optional[float] = Field(None, description="Total tuition amount (numeric only, no currency symbol)")
+    total_tuition_currency: Optional[str] = Field(None, description="Currency of the total tuition amount, e.g. 'AUD', 'USD', 'EUR'")
+    remit_amount: Optional[float] = Field(None, description="Amount to be remitted/paid now (numeric only, no currency symbol)")
+    remit_currency: Optional[str] = Field(None, description="Currency of the remit amount, e.g. 'AUD', 'USD', 'EUR'")
 
-    beneficiary_name: str = Field(..., description="Name of the university or college (beneficiary)")
-    university_address: str = Field(..., description="Full postal address of the university/beneficiary")
+    beneficiary_name: Optional[str] = Field(None, description="Name of the university or college (beneficiary)")
+    university_address: Optional[str] = Field(None, description="Full postal address of the university/beneficiary")
 
     iban: Optional[str] = Field(None, description="IBAN code for the payment (if provided)")
     swift: Optional[str] = Field(None, description="SWIFT/BIC code for the payment (if provided)")
@@ -293,10 +293,33 @@ Return ONLY the JSON object.
 
 
 
+def extract_text_from_pdf(content: bytes) -> list[str]:
+    """Extracts raw text from a PDF file using PyMuPDF, returning a list of page texts."""
+    doc = fitz.open(stream=content, filetype="pdf")
+    pages_text = []
+    for page in doc:
+        text = page.get_text().strip()
+        if text:
+            pages_text.append(text)
+    return pages_text
+
+
 @app.post("/extract-offer-letter")
 async def extract_offer_letter(file: UploadFile = File(...)):
     try:
-        stitched_bytes, mime_type = await prepare_stitched_image(file)
+        content = await file.read()
+        
+        # Initialize extracted data with all fields null
+        # We can use the Pydantic model to get default keys
+        merged_data = {field: None for field in OfferLetterData.__fields__}
+        
+        # 1. Try to extract raw text first (Hybrid Approach)
+        raw_pages = []
+        if file.filename.lower().endswith(".pdf"):
+            try:
+                raw_pages = extract_text_from_pdf(content)
+            except Exception as e:
+                print(f"Text extraction failed: {e}")
 
         structured_prompt = """
 You are extracting structured data from an OFFER LETTER.
@@ -326,49 +349,100 @@ Use EXACTLY this JSON structure:
 }
 
 Rules:
-- Read ALL pages of the offer letter.
+- Read the provided text.
 - Copy names, amounts, currencies, bank details, and addresses exactly as printed.
 - For amounts, use only numbers (no currency symbols); currencies go in the currency fields.
 - If any field is not present in the document, set its value to null.
 - Do NOT add, remove, or rename any keys.
 Return ONLY the JSON object.
 """
+        
+        # Helper to chunks pages
+        def chunk_pages(pages, chunk_size=4):
+            for i in range(0, len(pages), chunk_size):
+                yield pages[i:i + chunk_size]
 
+        # 2. Decide strategy
+        if raw_pages:
+            print("DEBUG: Using Iterative Text-Based Extraction (Hybrid)")
+            
+            # Placeholder image for API (1x1 pixel)
+            placeholder_img = Image.new("RGB", (10, 10), (255, 255, 255))
+            buf = io.BytesIO()
+            placeholder_img.save(buf, format="JPEG")
+            image_data = buf.getvalue()
+            filename_for_api = "placeholder.jpg"
 
-        raw_response = call_gpu_router_ocr(
-            structured_prompt, stitched_bytes, "offer_letter.jpg"
-        )
+            # Iterate through chunks
+            chunks = list(chunk_pages(raw_pages, chunk_size=4))
+            print(f"DEBUG: Processing {len(chunks)} chunks")
 
-        cleaned_response = (
-            raw_response.replace("``````", "").strip()
-        )
+            for i, chunk in enumerate(chunks):
+                chunk_text = "\n\n".join(chunk)
+                full_prompt = structured_prompt + f"\n\nDOCUMENT TEXT CONTENT (PART {i+1}/{len(chunks)}):\n{chunk_text}"
+                
+                print(f"DEBUG: Calling LLM for chunk {i+1}")
+                try:
+                    raw_response = call_gpu_router_ocr(full_prompt, image_data, filename_for_api)
+                    cleaned_response = raw_response.replace("``````", "").replace("```json", "").replace("```", "").strip()
+                    
+                    extracted_json = json.loads(cleaned_response)
+                    # Double-encoding check
+                    if isinstance(extracted_json, str):
+                        extracted_json = json.loads(extracted_json)
+                    
+                    data_part = extracted_json.get("extracted_data", {})
+                    
+                    # Merge logic: Only update if current value is None and new value is not None
+                    for key, val in data_part.items():
+                        if val is not None and merged_data.get(key) is None:
+                            merged_data[key] = val
+                            
+                except Exception as e:
+                    print(f"Error processing chunk {i+1}: {e}")
+                    continue
 
-        try:
+        else:
+            print("DEBUG: Using Vision-Based Extraction (Image Stitching) - First 4 pages only fallback")
+            # If text extraction failed (scanned PDF), we fall back to the old stitched image method
+            # For simplicity, we stick to the previous 'one-shot' vision approach, 
+            # or we could implement page-by-page vision if needed. 
+            # Keeping it simple for fallback:
+            await file.seek(0)
+            image_data, mime_type = await prepare_stitched_image(file)
+            
+            raw_response = call_gpu_router_ocr(structured_prompt, image_data, "offer_letter.jpg")
+            cleaned_response = raw_response.replace("``````", "").replace("```json", "").replace("```", "").strip()
             extracted_json = json.loads(cleaned_response)
-        except json.JSONDecodeError as e:
-            return {
-                "success": False,
-                "error": "Invalid JSON from model",
-                "raw_response": raw_response,
-                "validation_error": str(e),
-            }
+            if isinstance(extracted_json, str):
+                extracted_json = json.loads(extracted_json)
+                
+            merged_data = extracted_json.get("extracted_data", {})
 
+
+        # 3. Validation & Return
         try:
-            validated = OfferLetterExtraction(**extracted_json)
+            # Construct final object
+            final_structure = {
+                "document_type": "offer_letter",
+                "extracted_data": merged_data
+            }
+            
+            validated = OfferLetterExtraction(**final_structure)
             return {
                 "success": True,
                 "filename": file.filename,
                 "document_type": validated.document_type,
                 "extracted_data": validated.extracted_data.dict(),
                 "validated": True,
-                "raw_json": extracted_json,
+                "raw_json": final_structure,
             }
         except ValidationError as e:
             return {
                 "success": False,
                 "error": "Pydantic validation failed",
                 "validation_errors": e.errors(),
-                "raw_json": extracted_json,
+                "raw_json": final_structure,
             }
 
     except Exception as e:
