@@ -15,9 +15,6 @@ st.set_page_config(
 )
 
 st.title("📄 Document Extractor")
-st.markdown(
-    "Extract **unstructured text** or **structured JSON** from images and PDFs using your local FastAPI + LLM backend."
-)
 
 # ============================
 # Sidebar: mode & configuration
@@ -121,7 +118,13 @@ with col2:
                         else:
                             api_url = "http://localhost:8000/extract-text-image"
 
-                        files = {"file": uploaded_file.getvalue()}
+                        files = {
+                            "file": (
+                                uploaded_file.name,
+                                uploaded_file.getvalue(),
+                                uploaded_file.type,
+                            )
+                        }
                         data = {"prompt": unstructured_prompt}
 
                         response = requests.post(api_url, files=files, data=data)
@@ -188,9 +191,6 @@ with col2:
                                 st.success("✅ Extraction successful and validated!")
 
                                 st.metric("Document Type", result["document_type"])
-                                st.metric(
-                                    "Confidence", result.get("confidence", "N/A")
-                                )
 
                                 st.subheader("Extracted Data")
                                 st.json(result["extracted_data"])

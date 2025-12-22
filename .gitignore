@@ -1,23 +1,18 @@
-# Model files (too large for GitHub)
-models/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
 
-# Virtual environments
+# Virtual Environment
 venv/
+.venv/
 env/
-ENV/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Environment Variables
+.env
 
-# OS
+# Models
+models/
+
+# OS Files
 .DS_Store
 Thumbs.db
