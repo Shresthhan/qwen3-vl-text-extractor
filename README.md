@@ -1,6 +1,6 @@
 # Qwen3-VL Text Extractor
 
-A local tool to extract text and data from images and PDFs using the Qwen3-VL AI model.
+A tool to extract text and data from images and PDFs using the Qwen3-VL AI model via a remote GPU server.
 
 ## Features
 
@@ -8,65 +8,44 @@ A local tool to extract text and data from images and PDFs using the Qwen3-VL AI
 - **Reads PDFs** text directly for better accuracy
 - **Handles large files** page by page
 - **Extracts specific data** (like names, dates) into JSON
-- **100% offline** - keeps your data private
 - **Simple interface** for all tasks
-- **Uses Docker** to run the AI model
+- **Remote GPU processing** - no powerful local hardware needed
 
 ## How it Works
 
 1.  **UI**: Web interface to upload files.
 2.  **Backend**: Processes your requests.
-3.  **AI Model**: Reads the images and text.
+3.  **AI Model**: Sends images to a remote GPU server for analysis.
 
 ## Requirements
 
-- **Docker Desktop**
 - **Python 3.8 or newer**
-- **4GB disk space**
-- **8GB RAM** (recommended)
+- **Internet Connection** (to reach the AI server)
+- **API Token**
 
 ## Setup
 
-### 1. Get Model Files
-
-Download these two files to a `models/` folder:
-- `Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf`
-- `mmproj-Qwen_Qwen3-VL-2B-Instruct-f16.gguf`
-
-### 2. Install Python Tools
+### 1. Install Python Tools
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Settings (Optional)
+### 2. Configure API Token
 
-Create a `.env` file if you have an API token:
+Create a `.env` file in the main folder and add your token:
 
 ```env
-QWEN_API_TOKEN=your_token
+QWEN_API_TOKEN=your_token_here
 ```
 
-### 4. Start AI Server via Docker
-
-```bash
-docker run -d --name qwen-extractor \
-  -p 8080:8080 \
-  -v ${PWD}/models:/models \
-  ghcr.io/ggml-org/llama.cpp:server \
-  --host 0.0.0.0 \
-  -m /models/Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf \
-  --mmproj /models/mmproj-Qwen_Qwen3-VL-2B-Instruct-f16.gguf \
-  -c 8192
-```
-
-### 5. Start Backend
+### 3. Start Backend
 
 ```bash
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 6. Start App
+### 4. Start App
 
 ```bash
 streamlit run frontend/app.py
@@ -95,7 +74,6 @@ Opens at `http://localhost:8501`.
 qwen3-vl-text-extractor/
 ├── backend/             # Server code
 ├── frontend/            # App interface
-├── models/              # AI model files
 ├── test_images/         # Test files
 ├── evaluate_model.py    # Testing script
 ├── requirements.txt     # List of tools needed
@@ -104,10 +82,10 @@ qwen3-vl-text-extractor/
 
 ## Help
 
-**Docker won't start:**
-- Check if port 8080 is free.
-- Check if model files are in `models/`.
-- Check if Docker has enough memory.
+**Connection Errors:**
+- Check your internet connection.
+- Verify your `QWEN_API_TOKEN` in the `.env` file is correct.
+- Ensure the backend server is running.
 
 **Error messages:**
 - Check the terminal for details.
