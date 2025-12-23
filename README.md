@@ -1,74 +1,53 @@
 # Qwen3-VL Text Extractor
 
-A powerful local AI-powered text extraction tool using Qwen3-VL-2B-Instruct model running via llama.cpp in Docker. Extract both unstructured text and structured JSON data from any document image or PDF.
+A local tool to extract text and data from images and PDFs using the Qwen3-VL AI model.
 
 ## Features
 
-- **Fast text extraction** from images and PDFs
-- **Hybrid PDF Processing** that extracts raw text directly from digital PDFs for perfect accuracy, falling back to vision only for scanned documents
-- **Iterative Chunking** for large PDFs to handle unlimited pages without hitting token limits
-- **Structured data extraction** with automatic JSON validation using Pydantic
-- **100% local** - no data sent to external APIs
-- **Unified Streamlit Interface** for both text and structured data
-- **Dockerized model serving** with llama.cpp
-- **Customizable extraction prompts**
-- **Automatic validation** for structured outputs
+- **Quick text extraction** from images and PDFs
+- **Reads PDFs** text directly for better accuracy
+- **Handles large files** page by page
+- **Extracts specific data** (like names, dates) into JSON
+- **100% offline** - keeps your data private
+- **Simple interface** for all tasks
+- **Uses Docker** to run the AI model
 
-## Architecture
+## How it Works
 
-    ┌─────────────────────┐
-    │  Streamlit UI       │  ← User Interface
-    │  - app.py           │     Combined extraction interface
-    └──────────┬──────────┘
-               │
-               ▼
-    ┌─────────────────────┐
-    │  FastAPI Backend    │  ← REST API
-    │  /extract-text-pdf  │     PDF text extraction
-    │  /extract-text-image│     Image text extraction
-    │  /extract-national-id     Structured ID extraction
-    │  /extract-offer-letter    Structured Offer Letter extraction
-    └──────────┬──────────┘
-               │
-               ▼
-    ┌─────────────────────┐
-    │  llama.cpp Server   │  ← AI Model (Docker)
-    │  Qwen3-VL-2B        │     Vision Language Model
-    └─────────────────────┘
+1.  **UI**: Web interface to upload files.
+2.  **Backend**: Processes your requests.
+3.  **AI Model**: Reads the images and text.
 
-## Prerequisites
+## Requirements
 
-- **Docker Desktop** (for running the model server)
-- **Python 3.8+**
-- **~4GB disk space** for model files
-- **8GB+ RAM** recommended
+- **Docker Desktop**
+- **Python 3.8 or newer**
+- **4GB disk space**
+- **8GB RAM** (recommended)
 
 ## Setup
 
-### 1. Download Model Files
+### 1. Get Model Files
 
-Download these files and place them in a `models/` directory:
+Download these two files to a `models/` folder:
+- `Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf`
+- `mmproj-Qwen_Qwen3-VL-2B-Instruct-f16.gguf`
 
-- `Qwen_Qwen3-VL-2B-Instruct-Q4_K_M.gguf` - Main model file
-- `mmproj-Qwen_Qwen3-VL-2B-Instruct-f16.gguf` - Vision projection file
-
-> Available from [Hugging Face](https://huggingface.co)
-
-### 2. Install Python Dependencies
+### 2. Install Python Tools
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure Environment
+### 3. Settings (Optional)
 
-Create a `.env` file in the root directory:
+Create a `.env` file if you have an API token:
 
 ```env
-QWEN_API_TOKEN=your_token_here (optional, if you have set up auth)
+QWEN_API_TOKEN=your_token
 ```
 
-### 4. Start the Model Server (Docker)
+### 4. Start AI Server via Docker
 
 ```bash
 docker run -d --name qwen-extractor \
@@ -81,60 +60,57 @@ docker run -d --name qwen-extractor \
   -c 8192
 ```
 
-### 5. Start the Backend API
+### 5. Start Backend
 
 ```bash
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 6. Start the Frontend
+### 6. Start App
 
 ```bash
 streamlit run frontend/app.py
 ```
 
-Opens at `http://localhost:8501`
+Opens at `http://localhost:8501`.
 
-## Usage
+## How to Use
 
-### Unstructured Text Extraction
-1. Open the UI
-2. Select "Unstructured text" mode
-3. Upload an image or PDF
-4. Click "Extract Text"
+### Get Text
+1. Open the app.
+2. Choose "Unstructured text".
+3. Upload file.
+4. Click "Extract Text".
 
-### Structured Data Extraction
-1. Select "Structured JSON" mode
-2. Choose "National ID" or "Offer Letter"
-3. Upload the document
-4. Click "Extract Structured Data"
-5. Download the validated JSON
+### Get Data (JSON)
+1. Choose "Structured JSON".
+2. Pick a type (like National ID).
+3. Upload file.
+4. Click "Extract Structured Data".
+5. Download the result.
 
-## Project Structure
+## Files
 
 ```
 qwen3-vl-text-extractor/
-├── backend/
-│   └── main.py              # FastAPI server
-├── frontend/
-│   └── app.py               # Streamlit UI
-├── models/                  # Model files (gitignored)
-├── test_images/             # Sample images
-├── evaluate_model.py        # Model evaluation script
-├── requirements.txt         # Python dependencies
+├── backend/             # Server code
+├── frontend/            # App interface
+├── models/              # AI model files
+├── test_images/         # Test files
+├── evaluate_model.py    # Testing script
+├── requirements.txt     # List of tools needed
 └── README.md
 ```
 
-## Troubleshooting
+## Help
 
-**Docker container won't start:**
-- Check if port 8080 is already in use
-- Ensure model files are in the correct directory
-- Verify Docker has enough memory allocated (8GB+ recommended)
+**Docker won't start:**
+- Check if port 8080 is free.
+- Check if model files are in `models/`.
+- Check if Docker has enough memory.
 
-**Backend Error:**
-- Check the console logs for detailed error messages
-- Ensure `python-dotenv` is installed if using `.env`
+**Error messages:**
+- Check the terminal for details.
 
 ## License
 
