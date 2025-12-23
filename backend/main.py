@@ -249,6 +249,7 @@ Return ONLY the JSON object.
         raw_response = call_gpu_router_ocr(
             structured_prompt, stitched_bytes, "national_id.jpg"
         )
+        
 
         # Clean possible markdown wrappers
         cleaned_response = raw_response.strip()
@@ -304,22 +305,59 @@ def extract_text_from_pdf(content: bytes) -> list[str]:
     return pages_text
 
 
+def stitch_images(pil_images: list[Image.Image]) -> bytes:
+    """Stitches a list of PIL images vertically and returns JPEG bytes."""
+    if not pil_images:
+        raise ValueError("No images to stitch")
+
+    total_width = max(img.width for img in pil_images)
+    total_height = sum(img.height for img in pil_images)
+    stitched_image = Image.new("RGB", (total_width, total_height), (255, 255, 255))
+
+    y_offset = 0
+    for img in pil_images:
+        x_offset = (total_width - img.width) // 2
+        stitched_image.paste(img, (x_offset, y_offset))
+        y_offset += img.height
+
+    # Only resize if height exceeds 4000 (increased from 3000 for better quality on chunks)
+    max_height = 4000
+    if total_height > max_height:
+        ratio = max_height / total_height
+        new_width = int(total_width * ratio)
+        stitched_image = stitched_image.resize(
+            (new_width, max_height), Image.Resampling.LANCZOS
+        )
+
+    buf = io.BytesIO()
+    stitched_image.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
+
+
+def get_pdf_images(content: bytes) -> list[Image.Image]:
+    """Converts all pages of a PDF to a list of PIL Images."""
+    doc = fitz.open(stream=content, filetype="pdf")
+    pil_images = []
+    for page in doc:
+        mat = fitz.Matrix(2.0, 2.0)
+        pix = page.get_pixmap(matrix=mat)
+        img_data = pix.tobytes("png")
+        pil_images.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
+    return pil_images
+
+
 @app.post("/extract-offer-letter")
 async def extract_offer_letter(file: UploadFile = File(...)):
     try:
         content = await file.read()
-        
-        # Initialize extracted data with all fields null
-        # We can use the Pydantic model to get default keys
+        is_pdf = file.filename.lower().endswith(".pdf")
+
+        # Start with all fields = None
         merged_data = {field: None for field in OfferLetterData.__fields__}
-        
-        # 1. Try to extract raw text first (Hybrid Approach)
-        raw_pages = []
-        if file.filename.lower().endswith(".pdf"):
-            try:
-                raw_pages = extract_text_from_pdf(content)
-            except Exception as e:
-                print(f"Text extraction failed: {e}")
+
+        def chunk_list(items, chunk_size):
+            for i in range(0, len(items), chunk_size):
+                yield items[i:i + chunk_size]
 
         structured_prompt = """
 You are extracting structured data from an OFFER LETTER.
@@ -330,14 +368,14 @@ Use EXACTLY this JSON structure:
 {
   "document_type": "offer_letter",
   "extracted_data": {
-    "course_name": "<string>",
-    "student_name": "<string>",
-    "total_tuition_amount": <number>,
-    "total_tuition_currency": "<string like 'AUD' or 'USD'>",
-    "remit_amount": <number>,
-    "remit_currency": "<string like 'AUD' or 'USD'>",
-    "beneficiary_name": "<string>",
-    "university_address": "<string>",
+    "course_name": "<string or null>",
+    "student_name": "<string or null>",
+    "total_tuition_amount": <number or null>,
+    "total_tuition_currency": "<string like 'AUD' or 'USD' or null>",
+    "remit_amount": <number or null>,
+    "remit_currency": "<string like 'AUD' or 'USD' or null>",
+    "beneficiary_name": "<string or null>",
+    "university_address": "<string or null>",
     "iban": "<string or null>",
     "swift": "<string or null>",
     "bsb": "<string or null>",
@@ -349,85 +387,64 @@ Use EXACTLY this JSON structure:
 }
 
 Rules:
-- Read the provided text.
+- Read ALL pages of the offer letter.
 - Copy names, amounts, currencies, bank details, and addresses exactly as printed.
 - For amounts, use only numbers (no currency symbols); currencies go in the currency fields.
 - If any field is not present in the document, set its value to null.
 - Do NOT add, remove, or rename any keys.
 Return ONLY the JSON object.
 """
-        
-        # Helper to chunks pages
-        def chunk_pages(pages, chunk_size=4):
-            for i in range(0, len(pages), chunk_size):
-                yield pages[i:i + chunk_size]
 
-        # 2. Decide strategy
-        if raw_pages:
-            print("DEBUG: Using Iterative Text-Based Extraction (Hybrid)")
-            
-            # Placeholder image for API (1x1 pixel)
-            placeholder_img = Image.new("RGB", (10, 10), (255, 255, 255))
-            buf = io.BytesIO()
-            placeholder_img.save(buf, format="JPEG")
-            image_data = buf.getvalue()
-            filename_for_api = "placeholder.jpg"
-
-            # Iterate through chunks
-            chunks = list(chunk_pages(raw_pages, chunk_size=4))
-            print(f"DEBUG: Processing {len(chunks)} chunks")
-
-            for i, chunk in enumerate(chunks):
-                chunk_text = "\n\n".join(chunk)
-                full_prompt = structured_prompt + f"\n\nDOCUMENT TEXT CONTENT (PART {i+1}/{len(chunks)}):\n{chunk_text}"
-                
-                print(f"DEBUG: Calling LLM for chunk {i+1}")
-                try:
-                    raw_response = call_gpu_router_ocr(full_prompt, image_data, filename_for_api)
-                    cleaned_response = raw_response.replace("``````", "").replace("```json", "").replace("```", "").strip()
-                    
-                    extracted_json = json.loads(cleaned_response)
-                    # Double-encoding check
-                    if isinstance(extracted_json, str):
-                        extracted_json = json.loads(extracted_json)
-                    
-                    data_part = extracted_json.get("extracted_data", {})
-                    
-                    # Merge logic: Only update if current value is None and new value is not None
-                    for key, val in data_part.items():
-                        if val is not None and merged_data.get(key) is None:
-                            merged_data[key] = val
-                            
-                except Exception as e:
-                    print(f"Error processing chunk {i+1}: {e}")
-                    continue
-
+        # ALWAYS use vision/OCR: convert PDF pages (or single image) to PIL images
+        if is_pdf:
+            pil_images = get_pdf_images(content)  # one PIL image per page
         else:
-            print("DEBUG: Using Vision-Based Extraction (Image Stitching) - First 4 pages only fallback")
-            # If text extraction failed (scanned PDF), we fall back to the old stitched image method
-            # For simplicity, we stick to the previous 'one-shot' vision approach, 
-            # or we could implement page-by-page vision if needed. 
-            # Keeping it simple for fallback:
-            await file.seek(0)
-            image_data, mime_type = await prepare_stitched_image(file)
-            
-            raw_response = call_gpu_router_ocr(structured_prompt, image_data, "offer_letter.jpg")
-            cleaned_response = raw_response.replace("``````", "").replace("```json", "").replace("```", "").strip()
-            extracted_json = json.loads(cleaned_response)
-            if isinstance(extracted_json, str):
-                extracted_json = json.loads(extracted_json)
-                
-            merged_data = extracted_json.get("extracted_data", {})
+            pil_images = [Image.open(io.BytesIO(content)).convert("RGB")]
 
+        # Process images in small chunks (2 pages per stitched image) for high quality
+        chunks = list(chunk_list(pil_images, chunk_size=2))
+        print(f"DEBUG: Processing {len(chunks)} image chunks for offer letter")
 
-        # 3. Validation & Return
+        for i, chunk in enumerate(chunks, start=1):
+            try:
+                stitched_bytes = stitch_images(chunk)  # high-res stitched JPEG
+                print(f"DEBUG: Calling LLM for image chunk {i}")
+
+                raw_response = call_gpu_router_ocr(
+                    structured_prompt,
+                    stitched_bytes,
+                    f"offer_letter_chunk_{i}.jpg",
+                )
+
+                cleaned_response = (
+                    raw_response.replace("``````", "")
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+
+                extracted_json = json.loads(cleaned_response)
+                if isinstance(extracted_json, str):
+                    extracted_json = json.loads(extracted_json)
+
+                data_part = extracted_json.get("extracted_data", {})
+
+                # Merge: only fill fields that are still None
+                for key, val in data_part.items():
+                    if val is not None and merged_data.get(key) is None:
+                        merged_data[key] = val
+
+            except Exception as e:
+                print(f"Error processing image chunk {i}: {e}")
+                continue
+
+        # Final validation
+        final_structure = {
+            "document_type": "offer_letter",
+            "extracted_data": merged_data,
+        }
+
         try:
-            # Construct final object
-            final_structure = {
-                "document_type": "offer_letter",
-                "extracted_data": merged_data
-            }
-            
             validated = OfferLetterExtraction(**final_structure)
             return {
                 "success": True,
@@ -447,6 +464,7 @@ Return ONLY the JSON object.
 
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 
 @app.get("/health")
