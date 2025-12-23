@@ -49,26 +49,31 @@ class NepalNationalIDCardData(BaseModel):
 
 class OfferLetterData(BaseModel):
 
-    course_name: Optional[str] = Field(None, description="Name of the course/program the student is admitted to")
-    student_name: Optional[str] = Field(None, description="Full name of the student")
+    student_name: str = Field(..., description="Full legal name of the student exactly as written in the offer letter.")
 
-    total_tuition_amount: Optional[float] = Field(None, description="Total tuition amount (numeric only, no currency symbol)")
-    total_tuition_currency: Optional[str] = Field(None, description="Currency of the total tuition amount, e.g. 'AUD', 'USD', 'EUR'")
-    remit_amount: Optional[float] = Field(None, description="Amount to be remitted/paid now (numeric only, no currency symbol)")
-    remit_currency: Optional[str] = Field(None, description="Currency of the remit amount, e.g. 'AUD', 'USD', 'EUR'")
+    course_name: Optional[str] = Field(None, description="Exact name of the course/program the student is enrolled in (e.g. 'Bachelor of Information Technology').")
 
-    beneficiary_name: Optional[str] = Field(None, description="Name of the university or college (beneficiary)")
-    university_address: Optional[str] = Field(None, description="Full postal address of the university/beneficiary")
+    university_name: Optional[str] = Field(None, description="Official name of the university or college issuing the offer letter (e.g. 'Deakin University').")
 
-    iban: Optional[str] = Field(None, description="IBAN code for the payment (if provided)")
-    swift: Optional[str] = Field(None, description="SWIFT/BIC code for the payment (if provided)")
+    university_address: Optional[str] = Field(None, description="Full postal address of the university/college, including street, city, state/region, and country.")
+
+    total_tuition_amount: Optional[int] = Field(None, description="Total tuition fee for the whole course or stated study period (numeric value only, no currency symbol or commas).")
+
+    remit_amount: Optional[int] = Field(None, description="Initial remittance amount to be paid now (numeric value only, no currency symbol, not the total tuition fee).")
+
+    remit_currency: Optional[str] = Field(None, description="Currency for the remittance amount, e.g. 'AUD', 'USD', 'EUR', 'JPY', 'NRP', or '$'.")
+
+    iban_number: Optional[str] = Field(None, description="IBAN of the beneficiary bank account, including country code and all digits/letters, exactly as printed.")
+
+    swift_code: Optional[str] = Field(None, description="SWIFT/BIC code of the beneficiary bank, exactly as printed (e.g. 'DEUTDEFFXXX').")
+
     bsb: Optional[str] = Field(None, description="BSB code for Australian bank transfers (if provided)")
+
     account_number: Optional[str] = Field(None, description="Bank account number of the beneficiary (if provided)")
-    bank_name: Optional[str] = Field(None, description="Name of the bank (if explicitly mentioned)")
 
-    payment_purpose: Optional[str] = Field(None, description="Purpose/reference for the payment of remit amount")
-    payment_reference: Optional[str] = Field(None, description="Specific payment reference or student ID to use in bank transfer")
+    bank_name: Optional[str] = Field(None, description="Official name of the beneficiary bank handling the payment (e.g. 'Commonwealth Bank of Australia').")
 
+    payment_purpose: Optional[str] = Field(None, description="Purpose of the payment as described in the letter (e.g. 'Tuition fee deposit' or 'COE deposit').")
 
 class NepalNationalIDCardExtraction(BaseModel):
     document_type: str               
@@ -320,7 +325,7 @@ def stitch_images(pil_images: list[Image.Image]) -> bytes:
         stitched_image.paste(img, (x_offset, y_offset))
         y_offset += img.height
 
-    # Only resize if height exceeds 4000 (increased from 3000 for better quality on chunks)
+    # Only resize if height exceeds 4000 
     max_height = 4000
     if total_height > max_height:
         ratio = max_height / total_height
@@ -360,40 +365,56 @@ async def extract_offer_letter(file: UploadFile = File(...)):
                 yield items[i:i + chunk_size]
 
         structured_prompt = """
-You are extracting structured data from an OFFER LETTER.
+You are extracting structured data from a STUDENT OFFER LETTER used for tuition payment and bank remittance.
 
 Return ONLY valid JSON, no explanations, no markdown, no code blocks.
-Use EXACTLY this JSON structure:
+Use EXACTLY this JSON structure and key names:
 
 {
   "document_type": "offer_letter",
   "extracted_data": {
+    "student_name": "<string>",
     "course_name": "<string or null>",
-    "student_name": "<string or null>",
-    "total_tuition_amount": <number or null>,
-    "total_tuition_currency": "<string like 'AUD' or 'USD' or null>",
-    "remit_amount": <number or null>,
-    "remit_currency": "<string like 'AUD' or 'USD' or null>",
-    "beneficiary_name": "<string or null>",
+    "university_name": "<string or null>",
     "university_address": "<string or null>",
-    "iban": "<string or null>",
-    "swift": "<string or null>",
+    "total_tuition_amount": <integer or null>,
+    "remit_amount": <integer or null>,
+    "remit_currency": "<string>",
+    "iban_number": "<string or null>",
+    "swift_code": "<string or null>",
     "bsb": "<string or null>",
     "account_number": "<string or null>",
     "bank_name": "<string or null>",
-    "payment_purpose": "<string or null>",
-    "payment_reference": "<string or null>"
+    "payment_purpose": "<string or null>"
   }
 }
 
-Rules:
-- Read ALL pages of the offer letter.
-- Copy names, amounts, currencies, bank details, and addresses exactly as printed.
-- For amounts, use only numbers (no currency symbols); currencies go in the currency fields.
-- If any field is not present in the document, set its value to null.
-- Do NOT add, remove, or rename any keys.
+Field meanings and rules:
+- student_name: Full legal name of the student exactly as written in the offer letter.
+- course_name: Exact course/program name (for example 'Bachelor of Information Technology').
+- university_name: Official name of the university or college issuing the offer letter.
+- university_address: Full postal address of the university/college (street, city, state/region, country).
+- total_tuition_amount: Total tuition fee for the whole course or defined study period. Use only digits (no commas, no currency symbols).
+- remit_amount: Initial remittance/deposit amount to be paid now (not the total tuition amount). Use only digits (no commas, no currency symbols).
+- remit_currency: Currency for the remittance amount, for example 'AUD', 'USD', 'EUR', 'JPY', 'NRP' or a symbol like '$'. Always return a non-null string.
+- iban_number: IBAN of the beneficiary bank account, including country code and all characters.
+- swift_code: SWIFT/BIC code of the beneficiary bank.
+- bsb: BSB code for Australian bank transfers. Look for a 6-digit number often formatted as XXX-XXX (e.g., 062-000). Must return this if found. 
+- account_number: Bank account number of the beneficiary. Return only if you see account number in the offer letter.
+- bank_name: Official name of the beneficiary bank handling the payment. eg. 'Commonwealth Bank of Australia'
+- payment_purpose: Purpose of the payment (for example 'Tuition fee deposit', 'COE deposit', or similar phrase). 
+
+General rules:
+- STRICTLY EXTRACT VALUES you see in the document. Do NOT return null if a value is present.
+- Look for bank details (BSB, IBAN, SWIFT, Account Number) in headers, footers, and payment instruction sections.
+- BSB codes usually look like 'BSB: 123-456' or just '123-456'.
+- Copy names, codes, and addresses exactly as written.
+- For numeric fields, output plain integers only.
+- Do NOT add, remove, or rename any keys in the JSON.
 Return ONLY the JSON object.
 """
+
+
 
         # ALWAYS use vision/OCR: convert PDF pages (or single image) to PIL images
         if is_pdf:
@@ -401,8 +422,8 @@ Return ONLY the JSON object.
         else:
             pil_images = [Image.open(io.BytesIO(content)).convert("RGB")]
 
-        # Process images in small chunks (2 pages per stitched image) for high quality
-        chunks = list(chunk_list(pil_images, chunk_size=2))
+        # Process images page by page (chunk_size=1) for maximum resolution and OCR accuracy
+        chunks = list(chunk_list(pil_images, chunk_size=1))
         print(f"DEBUG: Processing {len(chunks)} image chunks for offer letter")
 
         for i, chunk in enumerate(chunks, start=1):
@@ -429,10 +450,14 @@ Return ONLY the JSON object.
 
                 data_part = extracted_json.get("extracted_data", {})
 
-                # Merge: only fill fields that are still None
+                # Merge: only fill fields that are still None or empty
                 for key, val in data_part.items():
-                    if val is not None and merged_data.get(key) is None:
-                        merged_data[key] = val
+                    # We accept val if it's not None and not an empty string
+                    if val is not None and val != "":
+                         # We only update if the current stored value is None or empty
+                        current_val = merged_data.get(key)
+                        if current_val is None or current_val == "":
+                            merged_data[key] = val
 
             except Exception as e:
                 print(f"Error processing image chunk {i}: {e}")
