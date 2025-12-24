@@ -100,7 +100,7 @@ async def prepare_stitched_image(file: UploadFile) -> Tuple[bytes, str]:
         if len(doc) == 0:
             raise ValueError("Empty PDF file")
         for page in doc:
-            mat = fitz.Matrix(2.0, 2.0)
+            mat = fitz.Matrix(3.0, 3.0)
             pix = page.get_pixmap(matrix=mat)
             img_data = pix.tobytes("png")
             pil_images.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
@@ -357,37 +357,33 @@ async def extract_offer_letter(file: UploadFile = File(...)):
         content = await file.read()
         is_pdf = file.filename.lower().endswith(".pdf")
 
-        # Start with all fields = None
-        merged_data = {field: None for field in OfferLetterData.__fields__}
-
         def chunk_list(items, chunk_size):
             for i in range(0, len(items), chunk_size):
                 yield items[i:i + chunk_size]
 
         structured_prompt = """
-You are extracting structured data from a STUDENT OFFER LETTER used for tuition payment and bank remittance.
-
-Return ONLY valid JSON, no explanations, no markdown, no code blocks.
-Use EXACTLY this JSON structure and key names:
-
-{
-  "document_type": "offer_letter",
-  "extracted_data": {
-    "student_name": "<string>",
-    "course_name": "<string or null>",
-    "university_name": "<string or null>",
-    "university_address": "<string or null>",
-    "total_tuition_amount": <integer or null>,
-    "remit_amount": <integer or null>,
-    "remit_currency": "<string>",
-    "iban_number": "<string or null>",
-    "swift_code": "<string or null>",
-    "bsb": "<string or null>",
-    "account_number": "<string or null>",
-    "bank_name": "<string or null>",
-    "payment_purpose": "<string or null>"
-  }
-}
+        You are extracting structured data from a STUDENT OFFER LETTER used for tuition payment and bank remittance.
+        Return ONLY valid JSON, no explanations, no markdown, no code blocks.
+        Use EXACTLY this JSON structure and key names:
+        
+        {
+          "document_type": "offer_letter",
+          "extracted_data": {
+            "student_name": "",
+            "course_name": "",
+            "university_name": "",
+            "university_address": "",
+            "total_tuition_amount": null,
+            "remit_amount": null,
+            "remit_currency": "",
+            "iban_number": "",
+            "swift_code": "",
+            "bsb": "",
+            "account_number": "",
+            "bank_name": "",
+            "payment_purpose": ""
+          }
+        }
 
 Field meanings and rules:
 - student_name: Full legal name of the student exactly as written in the offer letter.
@@ -398,7 +394,7 @@ Field meanings and rules:
 - remit_amount: Initial remittance/deposit amount to be paid now (not the total tuition amount). Use only digits (no commas, no currency symbols).
 - remit_currency: Currency for the remittance amount, for example 'AUD', 'USD', 'EUR', 'JPY', 'NRP' or a symbol like '$'. Always return a non-null string.
 - iban_number: IBAN of the beneficiary bank account, including country code and all characters.
-- swift_code: SWIFT/BIC code of the beneficiary bank.
+- swift_code: SWIFT/BIC code of the beneficiary bank. May be labeled as "SWIFT:", "SWIFT CODE:", "BIC:", "BIC CODE:", or "SWIFT/BIC:". Format is 8-11 characters like 'ABCDAU2SXXX'.
 - bsb: BSB code for Australian bank transfers. Look for a 6-digit number often formatted as XXX-XXX (e.g., 062-000). Must return this if found. 
 - account_number: Bank account number of the beneficiary. Return only if you see account number in the offer letter.
 - bank_name: Official name of the beneficiary bank handling the payment. eg. 'Commonwealth Bank of Australia'
@@ -408,67 +404,111 @@ General rules:
 - STRICTLY EXTRACT VALUES you see in the document. Do NOT return null if a value is present.
 - Look for bank details (BSB, IBAN, SWIFT, Account Number) in headers, footers, and payment instruction sections.
 - BSB codes usually look like 'BSB: 123-456' or just '123-456'.
+- SWIFT codes: Extract 8 or 11 character codes formatted like 'ABCDAU2SXXX'. Eg: 'SWIFT Code: WPACAU2SXXX'.
 - Copy names, codes, and addresses exactly as written.
 - For numeric fields, output plain integers only.
 - Do NOT add, remove, or rename any keys in the JSON.
 Return ONLY the JSON object.
-"""
+        """  
 
-
-
-        # ALWAYS use vision/OCR: convert PDF pages (or single image) to PIL images
+        # ✅ STEP 1: Get images (UNCHANGED)
         if is_pdf:
-            pil_images = get_pdf_images(content)  # one PIL image per page
+            pil_images = get_pdf_images(content)
         else:
             pil_images = [Image.open(io.BytesIO(content)).convert("RGB")]
 
-        # Process images page by page (chunk_size=1) for maximum resolution and OCR accuracy
         chunks = list(chunk_list(pil_images, chunk_size=1))
-        print(f"DEBUG: Processing {len(chunks)} image chunks for offer letter")
+        print(f"🚀 Processing {len(chunks)} chunks...")
 
+        # ✅ STEP 2: COLLECT ALL CHUNKS FIRST (NEW)
+        all_chunks_data = []
         for i, chunk in enumerate(chunks, start=1):
             try:
-                stitched_bytes = stitch_images(chunk)  # high-res stitched JPEG
-                print(f"DEBUG: Calling LLM for image chunk {i}")
-
+                print(f"\n📄 Processing chunk {i}/{len(chunks)}...")
+                stitched_bytes = stitch_images(chunk)
+                
                 raw_response = call_gpu_router_ocr(
                     structured_prompt,
                     stitched_bytes,
                     f"offer_letter_chunk_{i}.jpg",
                 )
-
+                
+                # Clean JSON response
                 cleaned_response = (
-                    raw_response.replace("``````", "")
-                    .replace("```json", "")
-                    .replace("```", "")
-                    .strip()
+                    raw_response.replace("```json", "")
+                               .replace("```", "")
+                               .replace("``````", "")
+                               .strip()
                 )
-
-                extracted_json = json.loads(cleaned_response)
-                if isinstance(extracted_json, str):
-                    extracted_json = json.loads(extracted_json)
-
-                data_part = extracted_json.get("extracted_data", {})
-
-                # Merge: only fill fields that are still None or empty
-                for key, val in data_part.items():
-                    # We accept val if it's not None and not an empty string
-                    if val is not None and val != "":
-                         # We only update if the current stored value is None or empty
-                        current_val = merged_data.get(key)
-                        if current_val is None or current_val == "":
-                            merged_data[key] = val
-
+                
+                chunk_json = json.loads(cleaned_response)
+                if isinstance(chunk_json, str):
+                    chunk_json = json.loads(chunk_json)
+                    
+                chunk_data = chunk_json.get("extracted_data", {})
+                
+                # ✅ STORE COMPLETE CHUNK DATA
+                all_chunks_data.append({
+                    "chunk_num": i,
+                    "full_data": chunk_data.copy(),
+                    "keys_found": list(chunk_data.keys())
+                })
+                
+                # ✅ DEBUG: Show this chunk
+                print(f"✅ Chunk {i}: {list(chunk_data.keys())}")
+                for key, value in chunk_data.items():
+                    if value:
+                        print(f"   {key}: '{value}'")
+                        
             except Exception as e:
-                print(f"Error processing image chunk {i}: {e}")
+                print(f"❌ Chunk {i} failed: {e}")
                 continue
 
-        # Final validation
+        print(f"\n📊 SUMMARY: {len(all_chunks_data)} successful chunks")
+
+        # ✅ STEP 3: SMART MERGE (NEW)
+        print("\n🔄 SMART MERGING...")
+        merged_data = {field: None for field in OfferLetterData.__fields__}
+        
+        for chunk in all_chunks_data:
+            chunk_num = chunk["chunk_num"]
+            chunk_data = chunk["full_data"]
+            
+            for key, val in chunk_data.items():
+                if val is not None and val != "":
+                    current_val = merged_data.get(key)
+                    
+                    # 🧠 SMART RULES BY FIELD TYPE
+                    if key in ["student_name", "university_name", "course_name", "university_address"]:
+                        # RULE 1: Keep LONGEST value
+                        if not current_val or len(str(val).strip()) > len(str(current_val).strip()):
+                            print(f"   📈 {key}: '{current_val}' → '{val}' (longer)")
+                            merged_data[key] = val
+                    
+                    elif key in ["total_tuition_amount", "remit_amount", "iban_number", "swift_code", "bsb", "account_number"]:
+                        # RULE 2: Keep FIRST non-empty (exact values)
+                        if current_val is None:
+                            print(f"   💰 {key}: {val}")
+                            merged_data[key] = val
+                    
+                    else:
+                        # RULE 3: Fill if empty
+                        if current_val is None or current_val == "":
+                            print(f"   ✅ {key}: '{val}'")
+                            merged_data[key] = val
+
+        # ✅ STEP 4: FINAL RESULT (UNCHANGED)
+        print("\n🎉 FINAL MERGED DATA:")
+        for key, value in merged_data.items():
+            status = "✅" if value else "❌"
+            print(f"  {status} {key}: {value}")
+
         final_structure = {
             "document_type": "offer_letter",
             "extracted_data": merged_data,
         }
 
+        # ✅ VALIDATION (UNCHANGED)
         try:
             validated = OfferLetterExtraction(**final_structure)
             return {
@@ -478,6 +518,7 @@ Return ONLY the JSON object.
                 "extracted_data": validated.extracted_data.dict(),
                 "validated": True,
                 "raw_json": final_structure,
+                "debug_chunks": len(all_chunks_data)  # Bonus info
             }
         except ValidationError as e:
             return {
@@ -489,6 +530,7 @@ Return ONLY the JSON object.
 
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 
 
