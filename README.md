@@ -53,9 +53,16 @@ All extracted and processed data is validated against a strict **Pydantic schema
 
 ## Setup
 
-### 1. Install Python Tools
+### 1. Setup Virtual Environment
 
 ```bash
+# Create venv (if not already exists)
+python -m venv .venv
+
+# Activate venv (Windows)
+.\.venv\Scripts\activate
+
+# Install tools inside venv
 pip install -r requirements.txt
 ```
 
