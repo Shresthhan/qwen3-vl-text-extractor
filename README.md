@@ -28,6 +28,7 @@ For multi-page documents, the system needs to combine information from different
 
 - **Step 1: Code Rules (Fast Path)**: Deterministic Python rules handle common merging scenarios:
   - Preferring 3-letter currency codes (e.g., "AUD" over "$").
+  - Script Preference: Favoring Latin script (English) names for universities and banks over native script or transliterated versions.
   - Validating numeric fields (amounts, account numbers).
   - Preferring longer, more complete addresses.
   - Handling payment purposes (preferring specific purposes over generic ones).
