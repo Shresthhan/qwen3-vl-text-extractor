@@ -86,48 +86,7 @@ class DynamicExtraction(BaseModel):
 # UTILITY FUNCTIONS
 # ========================================
 
-async def prepare_stitched_image(file: UploadFile) -> Tuple[bytes, str]:
-    """Prepares a stitched image from uploaded file (PDF or image)."""
-    content = await file.read()
-    pil_images = []
-
-    if file.filename.lower().endswith(".pdf"):
-        doc = fitz.open(stream=content, filetype="pdf")
-        if len(doc) == 0:
-            raise ValueError("Empty PDF file")
-        for page in doc:
-            mat = fitz.Matrix(3.0, 3.0)  # 3x zoom for better quality
-            pix = page.get_pixmap(matrix=mat)
-            img_data = pix.tobytes("png")
-            pil_images.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
-    else:
-        pil_images.append(Image.open(io.BytesIO(content)).convert("RGB"))
-
-    if not pil_images:
-        raise ValueError("No images processed")
-
-    total_width = max(img.width for img in pil_images)
-    total_height = sum(img.height for img in pil_images)
-    stitched_image = Image.new("RGB", (total_width, total_height), (255, 255, 255))
-
-    y_offset = 0
-    for img in pil_images:
-        x_offset = (total_width - img.width) // 2
-        stitched_image.paste(img, (x_offset, y_offset))
-        y_offset += img.height
-
-    max_height = 3000
-    if total_height > max_height:
-        ratio = max_height / total_height
-        new_width = int(total_width * ratio)
-        stitched_image = stitched_image.resize(
-            (new_width, max_height), Image.Resampling.LANCZOS
-        )
-
-    buf = io.BytesIO()
-    stitched_image.save(buf, format="JPEG", quality=85)
-    final_bytes = buf.getvalue()
-    return final_bytes, "image/jpeg"
+# prepare_stitched_image removed (redundant)
 
 
 def call_gpu_router_ocr(prompt: str, image_bytes: bytes, filename: str) -> str:
@@ -177,8 +136,8 @@ def stitch_images(pil_images: list[Image.Image]) -> bytes:
         stitched_image.paste(img, (x_offset, y_offset))
         y_offset += img.height
 
-    # Only resize if height exceeds 4000
-    max_height = 4000
+    # Only resize if height exceeds 2048 (Optimized for vision model clarity)
+    max_height = 2048
     if total_height > max_height:
         ratio = max_height / total_height
         new_width = int(total_width * ratio)
@@ -313,6 +272,48 @@ Return ONLY the romanized text, nothing else. No explanations, no quotes, just t
         return text
 
 
+def normalize_currency(val: str) -> str:
+    """
+    Standardize currency symbols and common strings to ISO 4217 3-letter codes.
+    """
+    if not val or not isinstance(val, str):
+        return val
+    
+    val_clean = val.strip().upper()
+    
+    # Mapping table
+    mapping = {
+        "$": "USD",
+        "€": "EUR",
+        "£": "GBP",
+        "¥": "JPY",
+        "₹": "INR",
+        "A$": "AUD",
+        "AU$": "AUD",
+        "C$": "CAD",
+        "CA$": "CAD",
+        "NZ$": "NZD",
+        "EURO": "EUR",
+        "US DOLLAR": "USD",
+        "AUSTRALIAN DOLLAR": "AUD",
+        "DOLLARS": "USD",
+        "DOLLAR": "USD"
+    }
+    
+    # Try direct mapping
+    if val_clean in mapping:
+        return mapping[val_clean]
+    
+    # Handle cases like "AUD$" or "$AUD" or "EUR €"
+    for symbol, code in mapping.items():
+        if symbol in val_clean:
+            # If the value contains the symbol and is reasonably short (might contain the symbol + extra)
+            # but we want to avoid matching 'USD' inside something like 'USDOLLAR' if we handle that separately.
+            return code
+            
+    return val_clean
+
+
 def llm_judge(field_name: str, val_a: Any, val_b: Any) -> Any:
     """
     Call LLM to judge between two conflicting values.
@@ -340,8 +341,9 @@ student_name:
 - Do not add any extra words that were not in the original name.
 - If the extracted text is "John Doe Student ID: 12345", the correct cleaned value is "John Doe".
 
-university_name / course_name:
+university_name / course_name / bank_name:
 - Prefer official clean name
+- PREFER English/Western names over transliterated or native script equivalents (e.g., "Tokyo University of Social Welfare" is better than "Tokyo Fukushi Daigaku")
 - Reject if includes campus location or extra details
 - Example: "Deakin University" is better than "Deakin University Melbourne Campus"
 
@@ -488,11 +490,20 @@ def hybrid_field_merge(field_name: str, current_val: Any, new_val: Any) -> Any:
         
         # RULE 4: Substring detection (university/course names)
         elif field_name in ["university_name", "course_name", "bank_name"]:
-            # If current is substring of new (new has extra text)
-            if current_str in new_str and len(current_str) < len(new_str):
+            # Rule 4a: Script Preference - Prefer Latin (English) over non-Latin
+            current_is_latin = all(ord(c) < 128 or (ord(c) >= 192 and ord(c) <= 591) for c in current_str if not c.isspace())
+            new_is_latin = all(ord(c) < 128 or (ord(c) >= 192 and ord(c) <= 591) for c in new_str if not c.isspace())
+            
+            if new_is_latin and not current_is_latin:
+                # print(f"   🔤 {field_name}: CODE RULE - preferring Latin script")
+                result = new_val
+            elif current_is_latin and not new_is_latin:
+                # print(f"   🔤 {field_name}: CODE RULE - keeping Latin script")
+                result = current_val
+            # Rule 4b: Substring detection
+            elif current_str in new_str and len(current_str) < len(new_str):
                 # print(f"   ✂️ {field_name}: CODE RULE - keeping shorter '{current_val}'")
                 result = current_val
-            # If new is substring of current (current has extra text)
             elif new_str in current_str and len(new_str) < len(current_str):
                 # print(f"   ✂️ {field_name}: CODE RULE - new is cleaner '{new_val}'")
                 result = new_val
@@ -562,6 +573,9 @@ def hybrid_field_merge(field_name: str, current_val: Any, new_val: Any) -> Any:
         if cleaned != result:
             pass  # print(f"   ✨ POST-PROCESS: '{result}' → '{cleaned}'")
         return cleaned
+    
+    if field_name == "remit_currency" and result:
+        return normalize_currency(result)
     
     return result
 
@@ -633,7 +647,13 @@ async def extract_text_pdf(
 async def extract_national_id(file: UploadFile = File(...)):
     """Extract structured data from Nepal National ID Card."""
     try:
-        stitched_bytes, mime_type = await prepare_stitched_image(file)
+        content = await file.read()
+        if file.filename.lower().endswith(".pdf"):
+            pil_images = get_pdf_images(content)
+        else:
+            pil_images = [Image.open(io.BytesIO(content)).convert("RGB")]
+            
+        stitched_bytes = stitch_images(pil_images)
 
         structured_prompt = """
 You are extracting data from a NEPAL NATIONAL IDENTITY CARD.
@@ -753,16 +773,16 @@ Use EXACTLY this JSON structure and key names:
 Field meanings and rules:
 - student_name: Full legal name of the student exactly as written in the offer letter.
 - course_name: Exact course/program name (for example 'Bachelor of Information Technology').
-- university_name: Official name of the university or college issuing the offer letter.
+- university_name: Official name of the university or college. PREFER the English name (e.g., 'Tokyo University of Social Welfare') even if the document also shows a non-Latin script name (e.g., 'Tokyo Fukushi Daigaku' or '東京福祉大学').
 - university_address: Full postal address of the university/college (street, city, state/region, country).
 - total_tuition_amount: Total tuition fee for the whole course or defined study period. Use only digits (no commas, no currency symbols).
 - remit_amount: Initial remittance/deposit amount to be paid now (not the total tuition amount). Use only digits (no commas, no currency symbols).
-- remit_currency: Currency for the remittance amount, for example 'AUD', 'USD', 'EUR', 'JPY', 'NRP' or a symbol like '$'. Always return a non-null string.
+- remit_currency: The ISO 4217 3-letter code for the remittance amount (e.g., 'AUD', 'USD', 'EUR', 'GBP', 'JPY', 'NPR'). Do NOT return symbols like '$', '€', '£'. ALWAYS return the 3-letter code.
 - iban_number: IBAN of the beneficiary bank account, including country code and all characters.
 - swift_code: SWIFT/BIC code of the beneficiary bank. May be labeled as "SWIFT:", "SWIFT CODE:", "BIC:", "BIC CODE:", or "SWIFT/BIC:". Format is 8-11 characters like 'ABCDAU2SXXX'.
 - bsb: BSB code for Australian bank transfers. Look for a 6-digit number often formatted as XXX-XXX (e.g., 062-000). Must return this if found.
 - account_number: Bank account number of the beneficiary. Return only if you see account number in the offer letter.
-- bank_name: Official name of the beneficiary bank handling the payment. eg. 'Commonwealth Bank of Australia'
+- bank_name: Official name of the beneficiary bank. PREFER the English name (e.g., 'Commonwealth Bank of Australia') over non-Latin script names.
 - payment_purpose: Purpose of the payment EXACTLY as stated in the document. Common examples include 'Tuition fee deposit', 'COE deposit', 'Living expenses', 'Accommodation fee', 'Application fee', 'Enrollment fee', etc. EXTRACT THE EXACT PHRASE from the document - do NOT assume it's tuition if it says something else.
 
 General rules:
