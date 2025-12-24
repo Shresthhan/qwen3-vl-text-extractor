@@ -36,10 +36,10 @@ For multi-page documents, the system needs to combine information from different
 
 ### 3. Post-Processing
 
-After the data is merged, it passes through the **Transliteration Engine**:
+After the data is merged, it passes through the final processing layer:
 
-- **Automatic Romanization**: The system detects non-Latin scripts (Chinese, Arabic, Japanese, Korean, Thai, Cyrillic, etc.).
-- **Phonetic Conversion**: It uses the LLM to convert these scripts into the Latin alphabet without translating the meaning (e.g., Japanese "東京福祉大学" becomes "Tokyo Fukushi Daigaku").
+- **Currency Normalization**: Common symbols (e.g., "$", "€", "£") and names (e.g., "Dollars", "Euro") are automatically converted to their standard ISO 4217 3-letter codes (e.g., "USD", "EUR", "GBP").
+- **Automatic Romanization**: The system detects non-Latin scripts (Chinese, Arabic, Japanese, Korean, Thai, Cyrillic, etc.) and uses the **Transliteration Engine** to convert them into the Latin alphabet phonetically.
 
 ### 4. Final Validation
 
