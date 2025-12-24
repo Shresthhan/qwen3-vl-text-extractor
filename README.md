@@ -16,25 +16,32 @@ A tool to extract text and data from images and PDFs using the Qwen3-VL AI model
 ## Program Flow & Logic
 
 ### 1. Data Extraction Flow
+
 The system processes documents through multiple specialized layers to ensure maximum accuracy:
+
 - **Preprocessing**: Large PDFs are split into single-page chunks. Each page is converted to a high-resolution JPEG to optimize visibility for the vision model.
-- **Vision Extraction**: Each page is analyzed by the **Qwen3-VL-2B** model. It identifies key fields and returns them in a structured JSON format.
+- **Vision Extraction**: Each page is analyzed by the **Qwen3-VL-8B** model. It identifies key fields and returns them in a structured JSON format.
 
 ### 2. Hybrid Merging System
+
 For multi-page documents, the system needs to combine information from different pages. We use a **Hybrid Merge** approach:
+
 - **Step 1: Code Rules (Fast Path)**: Deterministic Python rules handle common merging scenarios:
-    - Preferring 3-letter currency codes (e.g., "AUD" over "$").
-    - Validating numeric fields (amounts, account numbers).
-    - Preferring longer, more complete addresses.
-    - Handling payment purposes (preferring specific purposes over generic ones).
+  - Preferring 3-letter currency codes (e.g., "AUD" over "$").
+  - Validating numeric fields (amounts, account numbers).
+  - Preferring longer, more complete addresses.
+  - Handling payment purposes (preferring specific purposes over generic ones).
 - **Step 2: LLM Judge (Slow Path)**: If code rules cannot decide between two conflicting values, a dedicated LLM call acts as a "judge" to select the most contextually relevant value.
 
 ### 3. Post-Processing
+
 After the data is merged, it passes through the **Transliteration Engine**:
+
 - **Automatic Romanization**: The system detects non-Latin scripts (Chinese, Arabic, Japanese, Korean, Thai, Cyrillic, etc.).
 - **Phonetic Conversion**: It uses the LLM to convert these scripts into the Latin alphabet without translating the meaning (e.g., Japanese "東京福祉大学" becomes "Tokyo Fukushi Daigaku").
 
 ### 4. Final Validation
+
 All extracted and processed data is validated against a strict **Pydantic schema** to ensure the final JSON is consistent and error-free.
 
 ## Requirements
@@ -76,12 +83,14 @@ Opens at `http://localhost:8501`.
 ## How to Use
 
 ### Get Text
+
 1. Open the app.
 2. Choose "Unstructured text".
 3. Upload file.
 4. Click "Extract Text".
 
 ### Get Data (JSON)
+
 1. Choose "Structured JSON".
 2. Pick a type (like National ID).
 3. Upload file.
@@ -103,11 +112,13 @@ qwen3-vl-text-extractor/
 ## Help
 
 **Connection Errors:**
+
 - Check your internet connection.
 - Verify your `QWEN_API_TOKEN` in the `.env` file is correct.
 - Ensure the backend server is running.
 
 **Error messages:**
+
 - Check the terminal for details.
 
 ## License
