@@ -180,8 +180,8 @@ with col2:
                         elif doc_type == "offer_letter":
                             api_url = "http://localhost:8000/extract-offer-letter"
                         else:
-                            # Fallback if you keep a generic structured endpoint
-                            api_url = "http://localhost:8000/extract-structured"
+                            st.error(f"Unsupported document type: {doc_type}")
+                            st.stop()
 
                         response = requests.post(api_url, files=files)
 
