@@ -114,7 +114,6 @@ Opens at `http://localhost:8501`.
 #### Samples
 
 ![National ID Extraction](docs/images/OCR-national-id.png)
-![Offer Letter Extraction](docs/images/OCR-offer-letter.png)
 
 ## Files
 
