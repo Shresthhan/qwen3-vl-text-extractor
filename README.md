@@ -15,7 +15,9 @@ A tool to extract text and data from images and PDFs using the Qwen3-VL AI model
 
 ## Program Flow & Logic
 
-![System Flowchart](OCR-system-flow.png)
+<p align="center">
+  <img src="docs/images/OCR-system-flow.png" width="600" alt="System Flowchart">
+</p>
 
 ### 1. Data Extraction Flow
 
@@ -99,7 +101,7 @@ Opens at `http://localhost:8501`.
 3. Upload file.
 4. Click "Extract Text".
 
-![Unstructured Extraction](OCR-text-extract.png)
+![Unstructured Extraction](docs/images/OCR-text-extract.png)
 
 ### Get Data (JSON)
 
@@ -111,8 +113,8 @@ Opens at `http://localhost:8501`.
 
 #### Samples
 
-![National ID Extraction](OCR-national-id.png)
-![Offer Letter Extraction](OCR-offer-letter.png)
+![National ID Extraction](docs/images/OCR-national-id.png)
+![Offer Letter Extraction](docs/images/OCR-offer-letter.png)
 
 ## Files
 
