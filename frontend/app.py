@@ -4,6 +4,31 @@ from PIL import Image
 import fitz  # PyMuPDF
 import io
 import json
+import base64
+
+# ============================
+# Utilities
+# ============================
+def display_pdf(file_bytes: bytes):
+    """Renders all pages of a PDF to images inside a scrollable container for maximum compatibility."""
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        
+        # Use a fixed-height container with scrolling for a "native viewer" feel
+        with st.container(height=800):
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                # 2x zoom for better preview quality
+                pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                img_data = pix.tobytes("png")
+                st.image(
+                    img_data, 
+                    caption=f"Page {page_num + 1} of {len(doc)}", 
+                    use_container_width=True
+                )
+    except Exception as e:
+        st.error(f"Error rendering PDF preview: {e}")
+
 
 # ============================
 # Page config
@@ -74,19 +99,12 @@ with col1:
         if filename_lower.endswith(".pdf"):
             try:
                 pdf_bytes = uploaded_file.getvalue()
+                # Use scrollable image-based preview
+                display_pdf(pdf_bytes)
+                
+                # Info about pages (now below the viewer)
                 doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                if len(doc) > 0:
-                    page = doc[0]
-                    pix = page.get_pixmap()
-                    img_data = pix.tobytes("png")
-                    image = Image.open(io.BytesIO(img_data))
-                    st.image(
-                        image,
-                        caption=f"PDF Preview (Page 1 of {len(doc)})",
-                        use_container_width=True,
-                    )
-                else:
-                    st.error("Empty PDF file.")
+                st.info(f"📄 Full document preview ({len(doc)} pages)")
             except Exception as e:
                 st.error(f"Error previewing PDF: {e}")
         else:

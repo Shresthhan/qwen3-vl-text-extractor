@@ -789,7 +789,7 @@ General rules:
 - STRICTLY EXTRACT VALUES you see in the document. Do NOT return null if a value is present.
 - Look for bank details (BSB, IBAN, SWIFT, Account Number) in headers, footers, and payment instruction sections.
 - BSB codes usually look like 'BSB: 123-456' or just '123-456'.
-- SWIFT codes: Extract 8 or 11 character codes formatted like 'ABCDAU2SXXX'. Eg: 'SWIFT Code: WPACAU2SXXX'.
+- SWIFT codes: Extract 8 or 11 character codes formatted like 'ABCDAU2SXXX'. Eg: 'SWIFT Code: WPACAU2S'.
 - Copy names, codes, and addresses exactly as written.
 - For numeric fields, output plain integers only.
 - Do NOT add, remove, or rename any keys in the JSON.
